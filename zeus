@@ -1,0 +1,7 @@
+local success, errorMessage = pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/zsoyyo73-dotcom/Hola12/refs/heads/main/Z%20NExus%20P.lua.txt"))()
+end)
+
+if not success then
+    warn("Error al cargar el script: " .. tostring(errorMessage))
+end
