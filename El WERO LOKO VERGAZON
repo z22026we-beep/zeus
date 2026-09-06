@@ -872,14 +872,14 @@ task.spawn(function()
 
     local ESP_Data = {}
 
-    -- Función ultra ligera para obtener la parte principal sin importar la estructura del avatar (R6/R15/Custom)
-    local function GetRootPart(char)
+    -- Obtener la parte base del personaje de forma ultra rápida
+    local function GetRoot(char)
         if not char then return nil end
         return char:FindFirstChild("HumanoidRootPart") 
-            or char.PrimaryPart 
             or char:FindFirstChild("Torso") 
             or char:FindFirstChild("UpperTorso") 
-            or char:FindFirstChild("Head")
+            or char:FindFirstChild("Head") 
+            or char.PrimaryPart
     end
 
     local function CreateESP(player)
@@ -892,7 +892,7 @@ task.spawn(function()
         
         local stroke = Instance.new("UIStroke", box)
         stroke.Thickness = _G.Z_ESP_Thickness or 1.0
-        stroke.Color = _G.Z_ESP_Color
+        stroke.Color = _G.Z_ESP_Color or Color3.fromRGB(0, 255, 0)
 
         local bg = Instance.new("Frame", ESPGui)
         bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
@@ -920,69 +920,60 @@ task.spawn(function()
         end
     end
 
-    -- Cargar jugadores iniciales
-    local allPlayers = Players:GetPlayers()
-    for i = 1, #allPlayers do
-        local p = allPlayers[i]
-        if p ~= LP then CreateESP(p) end
-    end
-    
-    Players.PlayerAdded:Connect(function(p) 
-        if p ~= LP then CreateESP(p) end 
+    -- Escáner automático LITE: Revisa en segundo plano que TODOS tengan ESP asignado
+    task.spawn(function()
+        while true do
+            local currentPlayers = Players:GetPlayers()
+            for i = 1, #currentPlayers do
+                local p = currentPlayers[i]
+                if p ~= LP and not ESP_Data[p] then
+                    CreateESP(p)
+                end
+            end
+            task.wait(1) -- Se ejecuta cada segundo sin causar lag
+        end
     end)
+
     Players.PlayerRemoving:Connect(RemoveESP)
 
     RunService.RenderStepped:Connect(function()
         if not _G.Z_ESP_Master then
             for _, data in pairs(ESP_Data) do
-                if data.Box.Visible then data.Box.Visible = false end
-                if data.Bg.Visible then data.Bg.Visible = false end
+                data.Box.Visible = false
+                data.Bg.Visible = false
             end
             return
-        end
-
-        -- Respaldo automático: Si entra un jugador nuevo y el evento falló, se registra aquí de inmediato
-        local currentList = Players:GetPlayers()
-        for i = 1, #currentList do
-            local p = currentList[i]
-            if p ~= LP and not ESP_Data[p] then
-                CreateESP(p)
-            end
         end
 
         for player, data in pairs(ESP_Data) do
             local char = player.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local hrp = GetRootPart(char)
+            local hrp = GetRoot(char)
 
-            -- Validación directa sin depender de filtros estrictos que se rompen al reaparecer
-            if not char or not hum or not hrp or hum.Health <= 0 then
+            -- Si no hay personaje ni parte raíz, se oculta temporalmente hasta que respawnee
+            if not char or not hrp then
                 data.Box.Visible = false
                 data.Bg.Visible = false
                 continue
             end
 
-            -- Verificación opcional de jugadores reales si la función global existe
-            if _G.IsRealPlayer and not _G.IsRealPlayer(player) then
-                data.Box.Visible = false
-                data.Bg.Visible = false
-                continue
-            end
-
+            -- Filtro opcional de equipos
             if _G.Z_ESP_TeamCheck and player.Team and LP.Team and player.Team == LP.Team then
                 data.Box.Visible = false
                 data.Bg.Visible = false
                 continue
             end
 
-            local topWorld = (hrp.CFrame * CFrame.new(0, 3, 0)).Position
-            local botWorld = (hrp.CFrame * CFrame.new(0, -3.5, 0)).Position
+            -- Cálculo 3D a 2D directo y estable
+            local hrpPos = hrp.Position
+            local topWorld = hrpPos + Vector3.new(0, 3, 0)
+            local botWorld = hrpPos - Vector3.new(0, 3.5, 0)
 
-            local topPos, onScreen = Camera:WorldToViewportPoint(topWorld)
+            local topPos = Camera:WorldToViewportPoint(topWorld)
             local botPos = Camera:WorldToViewportPoint(botWorld)
 
-            -- Garantiza que esté visible en pantalla y en el campo de visión frontal (Z > 0)
-            if onScreen and topPos.Z > 0 then
+            -- Detección frontal de cámara
+            if topPos.Z > 0 then
                 local rawHeight = math.abs(topPos.Y - botPos.Y)
                 local height = math.round(math.max(rawHeight, 6))
                 local width = math.round(height / 1.8)
@@ -991,7 +982,7 @@ task.spawn(function()
                 local posY = math.round(topPos.Y)
 
                 if _G.Z_ESP_Boxes then
-                    data.Stroke.Color = _G.Z_ESP_Color 
+                    data.Stroke.Color = _G.Z_ESP_Color or Color3.fromRGB(0, 255, 0)
                     data.Stroke.Thickness = _G.Z_ESP_Thickness or 1.0
                     data.Box.Size = UDim2.new(0, width, 0, height)
                     data.Box.Position = UDim2.new(0, posX, 0, posY)
@@ -1006,8 +997,10 @@ task.spawn(function()
                     data.Bg.Position = UDim2.new(0, posX - (hbWidth + 2), 0, posY) 
                     data.Bg.Visible = true
 
-                    local maxHp = (hum.MaxHealth > 0 and hum.MaxHealth) or 100
-                    local hpPercent = math.clamp(hum.Health / maxHp, 0, 1)
+                    local maxHp = (hum and hum.MaxHealth > 0 and hum.MaxHealth) or 100
+                    local currentHp = (hum and hum.Health) or 100
+                    local hpPercent = math.clamp(currentHp / maxHp, 0, 1)
+                    
                     data.Fill.Size = UDim2.new(1, 0, hpPercent, 0)
                     data.Fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.3, 1, 1)
                 else
