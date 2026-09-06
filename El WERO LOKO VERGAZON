@@ -872,8 +872,18 @@ task.spawn(function()
 
     local ESP_Data = {}
 
+    -- Función ultra ligera para obtener la parte principal sin importar la estructura del avatar (R6/R15/Custom)
+    local function GetRootPart(char)
+        if not char then return nil end
+        return char:FindFirstChild("HumanoidRootPart") 
+            or char.PrimaryPart 
+            or char:FindFirstChild("Torso") 
+            or char:FindFirstChild("UpperTorso") 
+            or char:FindFirstChild("Head")
+    end
+
     local function CreateESP(player)
-        if ESP_Data[player] then return end
+        if ESP_Data[player] or player == LP then return end
         
         local box = Instance.new("Frame", ESPGui)
         box.BackgroundColor3 = Color3.new(1,1,1)
@@ -910,6 +920,7 @@ task.spawn(function()
         end
     end
 
+    -- Cargar jugadores iniciales
     local allPlayers = Players:GetPlayers()
     for i = 1, #allPlayers do
         local p = allPlayers[i]
@@ -930,12 +941,29 @@ task.spawn(function()
             return
         end
 
+        -- Respaldo automático: Si entra un jugador nuevo y el evento falló, se registra aquí de inmediato
+        local currentList = Players:GetPlayers()
+        for i = 1, #currentList do
+            local p = currentList[i]
+            if p ~= LP and not ESP_Data[p] then
+                CreateESP(p)
+            end
+        end
+
         for player, data in pairs(ESP_Data) do
             local char = player.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hrp = GetRootPart(char)
 
-            if not char or not hum or not hrp or hum.Health <= 0 or not IsRealPlayer(player) then
+            -- Validación directa sin depender de filtros estrictos que se rompen al reaparecer
+            if not char or not hum or not hrp or hum.Health <= 0 then
+                data.Box.Visible = false
+                data.Bg.Visible = false
+                continue
+            end
+
+            -- Verificación opcional de jugadores reales si la función global existe
+            if _G.IsRealPlayer and not _G.IsRealPlayer(player) then
                 data.Box.Visible = false
                 data.Bg.Visible = false
                 continue
@@ -953,7 +981,8 @@ task.spawn(function()
             local topPos, onScreen = Camera:WorldToViewportPoint(topWorld)
             local botPos = Camera:WorldToViewportPoint(botWorld)
 
-            if onScreen then
+            -- Garantiza que esté visible en pantalla y en el campo de visión frontal (Z > 0)
+            if onScreen and topPos.Z > 0 then
                 local rawHeight = math.abs(topPos.Y - botPos.Y)
                 local height = math.round(math.max(rawHeight, 6))
                 local width = math.round(height / 1.8)
@@ -977,7 +1006,8 @@ task.spawn(function()
                     data.Bg.Position = UDim2.new(0, posX - (hbWidth + 2), 0, posY) 
                     data.Bg.Visible = true
 
-                    local hpPercent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                    local maxHp = (hum.MaxHealth > 0 and hum.MaxHealth) or 100
+                    local hpPercent = math.clamp(hum.Health / maxHp, 0, 1)
                     data.Fill.Size = UDim2.new(1, 0, hpPercent, 0)
                     data.Fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.3, 1, 1)
                 else
