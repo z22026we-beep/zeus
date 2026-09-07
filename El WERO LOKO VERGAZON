@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Player = LocalPlayer
-local Camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
@@ -12,7 +11,6 @@ local Vector2New = Vector2.new
 local Vector3New = Vector3.new
 local FindFirstChild = game.FindFirstChild
 local FindFirstChildOfClass = game.FindFirstChildOfClass
-local WorldToViewportPoint = Camera.WorldToViewportPoint
 local unpack = unpack
 local math_huge = math.huge
 local math_max = math.max
@@ -59,6 +57,24 @@ Players.PlayerRemoving:Connect(function(plr)
     end
 end)
 
+local function onCharacterRemoving(char)
+    if char then
+        botCheckCache[char] = nil
+        partCache[char] = nil
+    end
+end
+
+for _, plr in pairs(Players:GetPlayers()) do
+    if plr ~= LocalPlayer then
+        plr.CharacterRemoving:Connect(onCharacterRemoving)
+    end
+end
+Players.PlayerAdded:Connect(function(plr)
+    if plr ~= LocalPlayer then
+        plr.CharacterRemoving:Connect(onCharacterRemoving)
+    end
+end)
+
 task.spawn(function()
     while true do
         task.wait(30)
@@ -66,33 +82,97 @@ task.spawn(function()
     end
 end)
 
+local function IsRealPlayer(player)
+    if not player or not player:IsA("Player") or player == LocalPlayer or player.UserId <= 0 then return false end
+    local char = player.Character
+    if not char or not char.Parent then return false end
+    if botCheckCache[char] ~= nil then return botCheckCache[char] end
+    local hum = FindFirstChildOfClass(char, "Humanoid")
+    local head = char:FindFirstChild("Head", true) or FindFirstChild(char, "Head")
+    local root = char:FindFirstChild("HumanoidRootPart", true) or FindFirstChild(char, "HumanoidRootPart")
+    if not hum or hum.Health <= 0 or not head or not root then 
+        botCheckCache[char] = false
+        return false 
+    end
+    local isReal = false
+    local parts = char:GetChildren()
+    for i = 1, #parts do
+        local part = parts[i]
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            if part.Transparency + part.LocalTransparencyModifier < 0.9 then
+                isReal = true
+                break
+            end
+        end
+    end
+    botCheckCache[char] = isReal
+    return isReal
+end
+
+_G.IsRealPlayer = IsRealPlayer
+
+_G.GetRealPlayers = function()
+    local realPlayers = {}
+    local allPlayers = Players:GetPlayers()
+    for i = 1, #allPlayers do
+        local player = allPlayers[i]
+        if IsRealPlayer(player) then
+            table.insert(realPlayers, player)
+        end
+    end
+    return realPlayers
+end
+
+local function getCachedBodyPart(char, targetType)
+    if not char then return nil end
+    local charCache = partCache[char]
+    if not charCache then
+        charCache = {}
+        partCache[char] = charCache
+    end
+    local cachedPart = charCache[targetType]
+    if cachedPart and cachedPart.Parent then
+        return cachedPart
+    end
+    local foundPart = nil
+    if targetType == "Head" then
+        foundPart = char:FindFirstChild("Head", true) or FindFirstChild(char, "Head")
+    elseif targetType == "Torso" then
+        foundPart = char:FindFirstChild("UpperTorso", true) 
+            or char:FindFirstChild("Torso", true) 
+            or char:FindFirstChild("LowerTorso", true) 
+            or char:FindFirstChild("HumanoidRootPart", true)
+    elseif targetType == "Pies" then
+        foundPart = char:FindFirstChild("LeftFoot", true) 
+            or char:FindFirstChild("RightFoot", true) 
+            or char:FindFirstChild("Left Leg", true) 
+            or char:FindFirstChild("Right Leg", true)
+            or char:FindFirstChild("LowerTorso", true)
+    end
+    charCache[targetType] = foundPart
+    return foundPart
+end
+
 local function ExecuteKill()
     local target = getgenv().CurrentTarget
     if not target then return end
-    
     local char = LocalPlayer.Character
     local backpack = LocalPlayer.Backpack
     local myRoot = char and char:FindFirstChild("HumanoidRootPart")
-    
     local gun = char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))
     if not gun or not myRoot then return end
-
     if gun.Parent ~= char then 
         char.Humanoid:EquipTool(gun)
         task.wait(0.05)
     end
-
     local rawPing = Stats.Network.ServerStatsItem["Data Ping"]:GetValueString():split(" ")[1]
     local pingValue = tonumber(rawPing) or 50
     local Prediction = (pingValue / 2500) + 0.175 
     local TargetPos = target.Position + (target.AssemblyLinearVelocity * Prediction)
-    
     local GunOrigin = myRoot.Position + Vector3.new(0, 2, 0)
     local args = { CFrame.new(GunOrigin), CFrame.new(TargetPos) }
-    
     if gun:FindFirstChild("Shoot") then 
         gun.Shoot:FireServer(unpack(args))
-        
         if V2_Active then
             task.wait(0.05)
             gun.Parent = backpack 
@@ -112,7 +192,6 @@ end)
 
 local function HackGun(v)
     if type(v) ~= "table" or not rawget(v, "gunName") then return end
-    
     if _G.Z_GunMods_InfAmmo then
         local hugeAmmo = 999999999
         v.AmmoInGun = hugeAmmo 
@@ -121,7 +200,6 @@ local function HackGun(v)
         v.MaxStoredAmmo = hugeAmmo 
         if rawget(v, "Jammed") ~= nil then v.Jammed = false end
     end
-
     if _G.Z_GunMods_NoRecoil then
         v.MinRecoilPower = 0; v.MaxRecoilPower = 0; v.RecoilPowerStepAmount = 0; v.Recoil = 0 
         if type(v.camRecoil) == "table" then
@@ -131,7 +209,6 @@ local function HackGun(v)
             v.gunRecoil.gunRecoilUp = {0,0}; v.gunRecoil.gunRecoilTilt = {0,0}; v.gunRecoil.gunRecoilLeft = {0,0}; v.gunRecoil.gunRecoilRight = {0,0}; v.gunRecoil.DownPunch = 0
         end
     end
-
     if _G.Z_GunMods_NoSpread then
         v.MinSpread = 0; v.MaxSpread = 0; v.AimInaccuracyStepAmount = 0; v.AimInaccuracyDecrease = 10
         if rawget(v, "Spread") ~= nil then v.Spread = 0 end
@@ -160,7 +237,6 @@ task.spawn(function()
                         HackGun(gunTable)
                     end
                 end
-                
                 local tool = Player.Character and Player.Character:FindFirstChildOfClass("Tool")
                 if tool and _G.Z_GunMods_InfAmmo then
                     for _, obj in pairs(tool:GetDescendants()) do
@@ -199,92 +275,6 @@ end
 
 if LocalPlayer.Character then RegisterCharToolListener(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(RegisterCharToolListener)
-
-local cachedRaycastParams = RaycastParamsNew()
-cachedRaycastParams.FilterType = Enum.RaycastFilterType.Include
-
-local function IsRealPlayer(player)
-    if not player or not player:IsA("Player") or player == LocalPlayer or player.UserId <= 0 then return false end
-    
-    local char = player.Character
-    if not char or not char.Parent then return false end
-    
-    if botCheckCache[char] ~= nil then
-        return botCheckCache[char]
-    end
-
-    local hum = FindFirstChildOfClass(char, "Humanoid")
-    local head = char:FindFirstChild("Head", true) or FindFirstChild(char, "Head")
-    local root = char:FindFirstChild("HumanoidRootPart", true) or FindFirstChild(char, "HumanoidRootPart")
-    
-    if not hum or hum.Health <= 0 or not head or not root then 
-        botCheckCache[char] = false
-        return false 
-    end
-
-    local isReal = false
-    local parts = char:GetChildren()
-    for i = 1, #parts do
-        local part = parts[i]
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            if part.Transparency + part.LocalTransparencyModifier < 0.9 then
-                isReal = true
-                break
-            end
-        end
-    end
-    
-    botCheckCache[char] = isReal
-    return isReal
-end
-
-_G.IsRealPlayer = IsRealPlayer
-
-_G.GetRealPlayers = function()
-    local realPlayers = {}
-    local allPlayers = Players:GetPlayers()
-    for i = 1, #allPlayers do
-        local player = allPlayers[i]
-        if IsRealPlayer(player) then
-            table.insert(realPlayers, player)
-        end
-    end
-    return realPlayers
-end
-
-local function getCachedBodyPart(char, targetType)
-    if not char then return nil end
-    
-    local charCache = partCache[char]
-    if not charCache then
-        charCache = {}
-        partCache[char] = charCache
-    end
-    
-    local cachedPart = charCache[targetType]
-    if cachedPart and cachedPart.Parent then
-        return cachedPart
-    end
-
-    local foundPart = nil
-    if targetType == "Head" then
-        foundPart = char:FindFirstChild("Head", true) or FindFirstChild(char, "Head")
-    elseif targetType == "Torso" then
-        foundPart = char:FindFirstChild("UpperTorso", true) 
-            or char:FindFirstChild("Torso", true) 
-            or char:FindFirstChild("LowerTorso", true) 
-            or char:FindFirstChild("HumanoidRootPart", true)
-    elseif targetType == "Pies" then
-        foundPart = char:FindFirstChild("LeftFoot", true) 
-            or char:FindFirstChild("RightFoot", true) 
-            or char:FindFirstChild("Left Leg", true) 
-            or char:FindFirstChild("Right Leg", true)
-            or char:FindFirstChild("LowerTorso", true)
-    end
-
-    charCache[targetType] = foundPart
-    return foundPart
-end
 
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
@@ -384,19 +374,14 @@ HomeTab:Button({
     end,
 })
 
-CombatTab:Section({
-    Title = "  Silent Aim",
-    Icon = "badge-check",
-})
+CombatTab:Section({ Title = "  Silent Aim", Icon = "badge-check" })
 
 CombatTab:Toggle({
     Title = "Silent Aim",
     Icon = "circle-check",
     Desc = "Activa la función de Silent Aim",
     Value = _G.Silent_Enabled,
-    Callback = function(Value)
-        _G.Silent_Enabled = Value
-    end,
+    Callback = function(Value) _G.Silent_Enabled = Value end,
 })
 
 CombatTab:Dropdown({
@@ -404,9 +389,7 @@ CombatTab:Dropdown({
     Desc = "Parte del cuerpo a la que apuntará",
     Values = {"Head", "Torso", "Pies"},
     Value = "Head",
-    Callback = function(Value)
-        _G.Silent_TargetPart = Value
-    end,
+    Callback = function(Value) _G.Silent_TargetPart = Value end,
 })
 
 CombatTab:Slider({
@@ -416,9 +399,7 @@ CombatTab:Slider({
     Max = 5000,
     Value = { Min = 1, Max = 5000, Default = _G.Silent_Range },
     Step = 1,
-    Callback = function(Value)
-        _G.Silent_Range = Value
-    end,
+    Callback = function(Value) _G.Silent_Range = Value end,
 })
 
 CombatTab:Slider({
@@ -428,9 +409,7 @@ CombatTab:Slider({
     Max = 500,
     Value = { Min = 1, Max = 500, Default = _G.Silent_FOV },
     Step = 1,
-    Callback = function(Value)
-        _G.Silent_FOV = Value
-    end,
+    Callback = function(Value) _G.Silent_FOV = Value end,
 })
 
 CombatTab:Toggle({
@@ -438,9 +417,7 @@ CombatTab:Toggle({
     Icon = "circle-check",
     Desc = "Muestra el círculo en pantalla",
     Value = _G.Silent_ShowFOV,
-    Callback = function(Value)
-        _G.Silent_ShowFOV = Value
-    end,
+    Callback = function(Value) _G.Silent_ShowFOV = Value end,
 })
 
 CombatTab:Toggle({
@@ -448,24 +425,17 @@ CombatTab:Toggle({
     Icon = "circle-check",
     Desc = "No apuntar a aliados",
     Value = _G.Silent_TeamCheck,
-    Callback = function(Value)
-        _G.Silent_TeamCheck = Value
-    end,
+    Callback = function(Value) _G.Silent_TeamCheck = Value end,
 })
 
 CombatTab:Dropdown({
     Title = "Silent Aim Mode",
-    Values = {"Normal", "Insta"},
+    Values = {"Normal", "Insta", "Disimulado"},
     Value = "Normal",
-    Callback = function(Value)
-        _G.Silent_Mode = Value
-    end,
+    Callback = function(Value) _G.Silent_Mode = Value end,
 })
 
-CombatTab:Section({
-    Title = "  Hitbox",
-    Icon = "flame",
-})
+CombatTab:Section({ Title = "  Hitbox", Icon = "flame" })
 
 CombatTab:Toggle({
     Title = "Hitbox",
@@ -494,9 +464,7 @@ CombatTab:Slider({
     Max = 50,
     Value = { Min = 1, Max = 50, Default = _G.Z_Hitbox_Size },
     Step = 1,
-    Callback = function(Value)
-        _G.Z_Hitbox_Size = Value
-    end,
+    Callback = function(Value) _G.Z_Hitbox_Size = Value end,
 })
 
 CombatTab:Toggle({
@@ -509,10 +477,7 @@ CombatTab:Toggle({
     end,
 })
 
-CombatTab:Section({
-    Title = "  Gunds Mods",
-    Icon = "code-xml",
-})
+CombatTab:Section({ Title = "  Gun Mods", Icon = "code-xml" })
 
 CombatTab:Toggle({
     Title = "Balas Infinitas",
@@ -547,19 +512,14 @@ CombatTab:Toggle({
     end,
 })
 
-RenderTab:Section({
-    Title = "  Esp 2d",
-    Icon = "users-round",
-})
+RenderTab:Section({ Title = "  ESP 2D", Icon = "users-round" })
 
 RenderTab:Toggle({
     Title = "ESP 2D",
     Icon = "circle-check",
     Desc = "Activa el wallhack visual",
     Value = _G.Z_ESP_Master,
-    Callback = function(Value)
-        _G.Z_ESP_Master = Value
-    end,
+    Callback = function(Value) _G.Z_ESP_Master = Value end,
 })
 
 RenderTab:Dropdown({
@@ -580,7 +540,6 @@ RenderTab:Dropdown({
     end,
 })
 
-
 RenderTab:Space()
 RenderTab:Space()
 
@@ -588,17 +547,13 @@ RenderTab:Toggle({
     Title = "ESP Team Check",
     Icon = "circle-check",
     Value = _G.Z_ESP_TeamCheck,
-    Callback = function(Value)
-        _G.Z_ESP_TeamCheck = Value
-    end,
+    Callback = function(Value) _G.Z_ESP_TeamCheck = Value end,
 })
 
 RenderTab:Colorpicker({
     Title = "ESP Box Color",
     Default = _G.Z_ESP_Color,
-    Callback = function(Value)
-        _G.Z_ESP_Color = Value
-    end,
+    Callback = function(Value) _G.Z_ESP_Color = Value end,
 })
 
 RenderTab:Slider({
@@ -607,9 +562,7 @@ RenderTab:Slider({
     Max = 5,
     Value = { Min = 1, Max = 5, Default = _G.Z_ESP_Thickness },
     Step = 1,
-    Callback = function(Value)
-        _G.Z_ESP_Thickness = Value
-    end,
+    Callback = function(Value) _G.Z_ESP_Thickness = Value end,
 })
 
 RenderTab:Slider({
@@ -618,9 +571,7 @@ RenderTab:Slider({
     Max = 10,
     Value = { Min = 1, Max = 10, Default = _G.Z_ESP_HealthBarThickness },
     Step = 1,
-    Callback = function(Value)
-        _G.Z_ESP_HealthBarThickness = Value
-    end,
+    Callback = function(Value) _G.Z_ESP_HealthBarThickness = Value end,
 })
 
 local nombresTemas = {}
@@ -634,9 +585,7 @@ InfoTab:Dropdown({
     Desc = "Elige el tema de color del menu",
     Values = nombresTemas,
     Value = "Midnight",
-    Callback = function(tema)
-        WindUI:SetTheme(tema)
-    end,
+    Callback = function(tema) WindUI:SetTheme(tema) end,
 })
 
 InfoTab:Space()
@@ -658,38 +607,92 @@ InfoTab:Dropdown({
     end,
 })
 
+--
+local FOVCircleGUI = nil
+local function createFOVCircle()
+    if FOVCircleGUI then return end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "FOVCircleGUI"
+    gui.IgnoreGuiInset = true
+    gui.Parent = CoreGui
+    local frame = Instance.new("Frame")
+    frame.Name = "FOVCircle"
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(0, _G.Silent_FOV*2, 0, _G.Silent_FOV*2)
+    frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    frame.Parent = gui
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.7
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = frame
+    FOVCircleGUI = {gui = gui, frame = frame, stroke = stroke}
+end
+
+local useDrawingFOV = pcall(function() 
+    local c = Drawing.new("Circle")
+    c:Remove()
+end)
+
+local FOVCircleDraw = nil
+if useDrawingFOV then
+    FOVCircleDraw = Drawing.new("Circle")
+    FOVCircleDraw.Thickness = 1.5
+    FOVCircleDraw.Color = Color3.fromRGB(255, 255, 255)
+    FOVCircleDraw.Transparency = 0.7
+    FOVCircleDraw.Filled = false
+    FOVCircleDraw.Visible = false
+else
+    createFOVCircle()
+end
+
+--
 local CurrentTargetSilent = nil
 local WeaponEquipped = false
 
 local TracerSilent = Drawing.new("Line")
 TracerSilent.Thickness = 2
-TracerSilent.Color = Color3.fromRGB(0, 0, 0)
+TracerSilent.Color = Color3.fromRGB(255, 255, 255)
 TracerSilent.Visible = false
 
-local FOVCircleSilent = Drawing.new("Circle")
-FOVCircleSilent.Thickness = 1.5
-FOVCircleSilent.Color = Color3.fromRGB(255, 255, 255)
-FOVCircleSilent.Transparency = 0.7
-FOVCircleSilent.Filled = false
-FOVCircleSilent.Visible = false
+local function hasLineOfSight(origin, targetPart, targetChar)
+    local params = RaycastParamsNew()
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.FilterDescendantsInstances = {LocalPlayer.Character, targetChar}
+    local result = workspace:Raycast(origin, (targetPart.Position - origin).Unit * (targetPart.Position - origin).Magnitude, params)
+    if result then
+        local hit = result.Instance
+        if hit and hit:IsDescendantOf(targetChar) then
+            return true
+        end
+        return false
+    end
+    return true
+end
 
 local function getClosestTargetSilent()
+    local cam = workspace.CurrentCamera
+    if not cam then return nil end
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
     local primaryPart = myChar.PrimaryPart or FindFirstChild(myChar, "HumanoidRootPart")
     if not primaryPart then return nil end
     
-    local vpSize = Camera.ViewportSize
+    local vpSize = cam.ViewportSize
     local centerPos = Vector2New(vpSize.X * 0.5, vpSize.Y * 0.5)
     local localPos = primaryPart.CFrame.Position
     local closestPart = nil
-    local minDist = math_huge
-
+    
     local targetPartType = _G.Silent_TargetPart
     local maxRange = _G.Silent_Range
     local maxFOV = _G.Silent_FOV
+    local minScreenDist = maxFOV  -- Solo detectar enemigos dentro del rango FOV
+    
     local teamCheck = _G.Silent_TeamCheck
     local myTeam = LocalPlayer.Team
+    local mode = _G.Silent_Mode
 
     local allPlayers = Players:GetPlayers()
     for i = 1, #allPlayers do
@@ -702,13 +705,18 @@ local function getClosestTargetSilent()
                     if targetPart then
                         local targetPos = targetPart.CFrame.Position
                         local dist = (localPos - targetPos).Magnitude
-                        
                         if dist <= maxRange then
-                            local sp, onScreen = WorldToViewportPoint(Camera, targetPos)
-                            if onScreen then
+                            local sp, onScreen = cam:WorldToViewportPoint(targetPos)
+                            if onScreen and sp.Z > 0 then
                                 local screenDist = (Vector2New(sp.X, sp.Y) - centerPos).Magnitude
-                                if screenDist <= maxFOV and dist < minDist then
-                                    minDist = dist
+                                if screenDist <= minScreenDist then
+                                    if mode == "Disimulado" then
+                                        local origin = primaryPart.Position + Vector3.new(0, 2, 0)
+                                        if not hasLineOfSight(origin, targetPart, plChar) then
+                                            continue
+                                        end
+                                    end
+                                    minScreenDist = screenDist
                                     closestPart = targetPart
                                 end
                             end
@@ -735,73 +743,100 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
     local method = getnamecallmethod()
     local args = {...}
     local self = args[1]
-
-    if _G.Silent_Enabled and not checkcaller() and self == workspace and method == "Raycast" then
-        local origin = args[2]
-        local direction = args[3]
-        if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" and CurrentTargetSilent then
-            local targetPos = CurrentTargetSilent.CFrame.Position
-            cachedRaycastParams.FilterDescendantsInstances = {CurrentTargetSilent.Parent}
-            args[3] = (targetPos - origin).Unit * math_max(direction.Magnitude, (targetPos - origin).Magnitude + 500)
-            args[4] = cachedRaycastParams
-            return oldNamecall(unpack(args))
+    if _G.Silent_Enabled and not checkcaller() and self == workspace then
+        if method == "Raycast" and CurrentTargetSilent then
+            local origin = args[2]
+            local direction = args[3]
+            if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                local targetPos = CurrentTargetSilent.Position
+                args[3] = (targetPos - origin).Unit * direction.Magnitude
+                return oldNamecall(unpack(args))
+            end
+        elseif (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay") and CurrentTargetSilent then
+            local ray = args[2]
+            if typeof(ray) == "Ray" then
+                local targetPos = CurrentTargetSilent.Position
+                local newRay = Ray.new(ray.Origin, (targetPos - ray.Origin).Unit * ray.Direction.Magnitude)
+                args[2] = newRay
+                return oldNamecall(unpack(args))
+            end
         end
     end
-
     return oldNamecall(...)
 end))
 
 RunService.RenderStepped:Connect(function()
-    if not _G.Silent_Enabled then
-        FOVCircleSilent.Visible = false
+    local cam = workspace.CurrentCamera
+    if not cam then
+        if FOVCircleDraw then FOVCircleDraw.Visible = false end
+        if FOVCircleGUI then FOVCircleGUI.frame.Visible = false end
         TracerSilent.Visible = false
+        CurrentTargetSilent = nil
         return
     end
 
-    local vpSize = Camera.ViewportSize
-    local center = Vector2New(vpSize.X * 0.5, vpSize.Y * 0.5)
+    if not _G.Silent_Enabled then
+        if FOVCircleDraw then FOVCircleDraw.Visible = false end
+        if FOVCircleGUI then FOVCircleGUI.frame.Visible = false end
+        TracerSilent.Visible = false
+        CurrentTargetSilent = nil
+        return
+    end
 
+    local vpSize = cam.ViewportSize
+    local center = Vector2New(vpSize.X * 0.5, vpSize.Y * 0.5)
     checkWeapon()
     CurrentTargetSilent = getClosestTargetSilent()
 
-    FOVCircleSilent.Position = center
-    FOVCircleSilent.Radius = _G.Silent_FOV
-    FOVCircleSilent.Visible = _G.Silent_ShowFOV
+    if FOVCircleDraw then
+        FOVCircleDraw.Position = center
+        FOVCircleDraw.Radius = _G.Silent_FOV
+        FOVCircleDraw.Visible = _G.Silent_ShowFOV
+    end
+    if FOVCircleGUI then
+        FOVCircleGUI.frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        FOVCircleGUI.frame.Size = UDim2.new(0, _G.Silent_FOV*2, 0, _G.Silent_FOV*2)
+        FOVCircleGUI.frame.Visible = _G.Silent_ShowFOV
+    end
 
     if CurrentTargetSilent then
-        local sp, onScreen = WorldToViewportPoint(Camera, CurrentTargetSilent.CFrame.Position)
-        if onScreen then
-            TracerSilent.From = center
-            TracerSilent.To = Vector2New(sp.X, sp.Y)
-            TracerSilent.Visible = true
+        local sp, onScreen = cam:WorldToViewportPoint(CurrentTargetSilent.Position)
+        if onScreen and sp.Z > 0 then
+            local screenDist = (Vector2New(sp.X, sp.Y) - center).Magnitude
+            if screenDist <= _G.Silent_FOV then
+                TracerSilent.From = center
+                TracerSilent.To = Vector2New(sp.X, sp.Y)
+                TracerSilent.Visible = true
+            else
+                TracerSilent.Visible = false
+                CurrentTargetSilent = nil
+            end
         else
             TracerSilent.Visible = false
+            CurrentTargetSilent = nil
         end
     else
         TracerSilent.Visible = false
     end
 end)
 
+--
 local lastHitboxTick = 0
 
 RunService.Heartbeat:Connect(function(deltaTime)
     lastHitboxTick = lastHitboxTick + deltaTime
     if lastHitboxTick < 0.1 and not _G.Z_Force_Reset then return end
     lastHitboxTick = 0
-
     if not _G.Z_Hitbox_Active and not _G.Z_Force_Reset then return end
-
     local lp = LocalPlayer
     local val_size = _G.Z_Hitbox_Size or 20
     local v_size = Vector3New(val_size, val_size, val_size)
-
-    local allPlayers = Players:GetPlayers()
-    for i = 1, #allPlayers do
-        local p = allPlayers[i]
+    local realPlayers = _G.GetRealPlayers()
+    for i = 1, #realPlayers do
+        local p = realPlayers[i]
         if p ~= lp and p.Character then
             local char = p.Character
             local is_team = _G.Z_Team_Check and lp.Team and p.Team == lp.Team
-
             if not _G.Z_Hitbox_Active or _G.Z_Force_Reset or is_team then
                 local charParts = char:GetChildren()
                 for j = 1, #charParts do
@@ -816,12 +851,9 @@ RunService.Heartbeat:Connect(function(deltaTime)
                 end
                 if is_team then continue end
             end
-
             if not _G.Z_Hitbox_Active then continue end
-
             local mode = _G.Z_Hitbox_Mode
             local targetPart = getCachedBodyPart(char, mode)
-
             if targetPart and targetPart:IsA("BasePart") then
                 if targetPart.Size ~= v_size then
                     if not originalHitboxData[targetPart] then
@@ -831,14 +863,12 @@ RunService.Heartbeat:Connect(function(deltaTime)
                             CanCollide = targetPart.CanCollide
                         }
                     end
-
                     targetPart.Size = v_size
                     targetPart.Transparency = 0.6
                     targetPart.Color = Color3.fromRGB(255, 0, 0)
                     targetPart.Material = Enum.Material.Neon
                     targetPart.CanCollide = false
                     targetPart.Massless = true
-
                     local m = FindFirstChildOfClass(targetPart, "SpecialMesh")
                     if m then m.Scale = Vector3New(1, 1, 1) end
                 end
@@ -848,17 +878,15 @@ RunService.Heartbeat:Connect(function(deltaTime)
     _G.Z_Force_Reset = false 
 end)
 
+--
 task.spawn(function()
     local LP = Players.LocalPlayer
-
     if CoreGui:FindFirstChild("Z_ESP_LITE") then 
         CoreGui.Z_ESP_LITE:Destroy() 
     end
-
     local ESPGui = Instance.new("ScreenGui")
     ESPGui.Name = "Z_ESP_LITE"
     ESPGui.IgnoreGuiInset = true 
-
     pcall(function()
         if gethui then
             ESPGui.Parent = gethui()
@@ -869,10 +897,7 @@ task.spawn(function()
             ESPGui.Parent = CoreGui
         end
     end)
-
     local ESP_Data = {}
-
-    --
     local function GetRoot(char)
         if not char then return nil end
         return char:FindFirstChild("HumanoidRootPart") 
@@ -881,35 +906,30 @@ task.spawn(function()
             or char:FindFirstChild("Head") 
             or char.PrimaryPart
     end
-
     local function CreateESP(player)
         if ESP_Data[player] or player == LP then return end
-        
         local box = Instance.new("Frame", ESPGui)
         box.BackgroundColor3 = Color3.new(1,1,1)
         box.BackgroundTransparency = 1
         box.Visible = false
-        
         local stroke = Instance.new("UIStroke", box)
         stroke.Thickness = _G.Z_ESP_Thickness or 1.0
         stroke.Color = _G.Z_ESP_Color or Color3.fromRGB(0, 255, 0)
+        stroke.Enabled = false
 
         local bg = Instance.new("Frame", ESPGui)
         bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         bg.BackgroundTransparency = 0.5
         bg.BorderSizePixel = 0
         bg.Visible = false
-
         local fill = Instance.new("Frame", bg)
         fill.AnchorPoint = Vector2.new(0, 1)
         fill.Position = UDim2.new(0, 0, 1, 0)
         fill.Size = UDim2.new(1, 0, 1, 0)
         fill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
         fill.BorderSizePixel = 0
-
         ESP_Data[player] = {Box = box, Bg = bg, Fill = fill, Stroke = stroke}
     end
-
     local function RemoveESP(player)
         if ESP_Data[player] then
             pcall(function()
@@ -919,88 +939,81 @@ task.spawn(function()
             ESP_Data[player] = nil
         end
     end
-
-    --
     task.spawn(function()
         while true do
-            local currentPlayers = Players:GetPlayers()
-            for i = 1, #currentPlayers do
-                local p = currentPlayers[i]
+            local realPlayers = _G.GetRealPlayers()
+            for i = 1, #realPlayers do
+                local p = realPlayers[i]
                 if p ~= LP and not ESP_Data[p] then
                     CreateESP(p)
                 end
             end
-            task.wait(1) --
+            task.wait(1)
         end
     end)
-
     Players.PlayerRemoving:Connect(RemoveESP)
-
     RunService.RenderStepped:Connect(function()
-        if not _G.Z_ESP_Master then
+        local cam = workspace.CurrentCamera
+        if not cam or not _G.Z_ESP_Master then
             for _, data in pairs(ESP_Data) do
                 data.Box.Visible = false
                 data.Bg.Visible = false
+                data.Stroke.Enabled = false
             end
             return
         end
-
         for player, data in pairs(ESP_Data) do
+            if not IsRealPlayer(player) then
+                data.Box.Visible = false
+                data.Bg.Visible = false
+                data.Stroke.Enabled = false
+                continue
+            end
             local char = player.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             local hrp = GetRoot(char)
-
-            --
             if not char or not hrp then
                 data.Box.Visible = false
                 data.Bg.Visible = false
+                data.Stroke.Enabled = false
                 continue
             end
-
-            --
             if _G.Z_ESP_TeamCheck and player.Team and LP.Team and player.Team == LP.Team then
                 data.Box.Visible = false
                 data.Bg.Visible = false
+                data.Stroke.Enabled = false
                 continue
             end
-
-            --
             local hrpPos = hrp.Position
             local topWorld = hrpPos + Vector3.new(0, 3, 0)
             local botWorld = hrpPos - Vector3.new(0, 3.5, 0)
-
-            local topPos = Camera:WorldToViewportPoint(topWorld)
-            local botPos = Camera:WorldToViewportPoint(botWorld)
-
-            --
+            local topPos = cam:WorldToViewportPoint(topWorld)
+            local botPos = cam:WorldToViewportPoint(botWorld)
             if topPos.Z > 0 then
                 local rawHeight = math.abs(topPos.Y - botPos.Y)
                 local height = math.round(math.max(rawHeight, 6))
                 local width = math.round(height / 1.8)
-                
                 local posX = math.round(topPos.X - (width / 2))
                 local posY = math.round(topPos.Y)
-
                 if _G.Z_ESP_Boxes then
                     data.Stroke.Color = _G.Z_ESP_Color or Color3.fromRGB(0, 255, 0)
                     data.Stroke.Thickness = _G.Z_ESP_Thickness or 1.0
+                    data.Stroke.Enabled = true
                     data.Box.Size = UDim2.new(0, width, 0, height)
                     data.Box.Position = UDim2.new(0, posX, 0, posY)
                     data.Box.Visible = true
                 else
                     data.Box.Visible = false
+                    data.Stroke.Enabled = false
                 end
-
                 if _G.Z_ESP_HealthBar then
                     local hbWidth = _G.Z_ESP_HealthBarThickness or 2
                     data.Bg.Size = UDim2.new(0, hbWidth, 0, height) 
                     data.Bg.Position = UDim2.new(0, posX - (hbWidth + 2), 0, posY) 
                     data.Bg.Visible = true
-
                     local maxHp = (hum and hum.MaxHealth > 0 and hum.MaxHealth) or 100
                     local currentHp = (hum and hum.Health) or 100
                     local hpPercent = math.clamp(currentHp / maxHp, 0, 1)
-                    
                     data.Fill.Size = UDim2.new(1, 0, hpPercent, 0)
                     data.Fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.3, 1, 1)
                 else
@@ -1009,7 +1022,10 @@ task.spawn(function()
             else
                 data.Box.Visible = false
                 data.Bg.Visible = false
+                data.Stroke.Enabled = false
             end
         end
     end)
 end)
+
+print("Z")
