@@ -1,4 +1,10 @@
-local Players = game:GetService("Players")
+=========
+
+CHAT GPT ZNX-LITE COMO PEDISTE WEY ANTI KICK 
+
+========
+
+ocal Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Player = LocalPlayer
 local RunService = game:GetService("RunService")
